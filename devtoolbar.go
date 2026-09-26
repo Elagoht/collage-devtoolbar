@@ -7,8 +7,9 @@
 //	})
 //
 // The panel says which page rendered and in which locale, the response's status,
-// how long the render took, its Cache-Control and ETag, its size, and how many
-// findings the plugins before it reported. Register it last: a render's findings
+// how long the render took and each fragment of it, which fragments failed, the
+// dependency tags the render depended on, its Cache-Control and ETag, its size,
+// and how many findings the plugins before it reported. Register it last: a render's findings
 // are only those of the plugins that ran before it.
 //
 // Outside development it does nothing at all: no middleware is installed, no hook
@@ -24,6 +25,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Elagoht/collage/pkg/collage"
 )
@@ -44,7 +46,7 @@ type Plugin struct {
 func New() *Plugin { return &Plugin{} }
 
 func (p *Plugin) Name() string                   { return Name }
-func (p *Plugin) Version() string                { return "0.1.0" }
+func (p *Plugin) Version() string                { return "0.2.0" }
 func (p *Plugin) Shutdown(context.Context) error { return nil }
 
 var (
@@ -71,12 +73,15 @@ type record struct {
 	degraded bool
 	errors   int
 	warnings int
+	// fragments and tags are the event's own copies, so the record may keep them.
+	fragments []collage.FragmentReport
+	tags      []string
 }
 
 type recordKey struct{}
 
-// OnAfterRender notes the page, its locale and its findings in the request's
-// record. The hook is handed the request's context, which is how the note reaches
+// OnAfterRender notes the page, its locale, its fragments, its dependency tags
+// and its findings in the request's record. The hook is handed the request's context, which is how the note reaches
 // the middleware that wraps the same request.
 func (p *Plugin) OnAfterRender(ctx context.Context, ev *collage.AfterRenderEvent) error {
 	if !p.dev || ev.Static {
@@ -93,6 +98,8 @@ func (p *Plugin) OnAfterRender(ctx context.Context, ev *collage.AfterRenderEvent
 		rec.page = ev.Page.Name
 		rec.strategy = ev.Page.Strategy.String()
 	}
+	rec.fragments = ev.Fragments
+	rec.tags = ev.DependencyTags
 	rec.errors, rec.warnings = 0, 0
 	for _, f := range ev.Findings {
 		if f.Level == collage.FindingError {
@@ -219,23 +226,52 @@ func render(rec *record, status int, h http.Header, size int) []byte {
 	}
 	renderTime := dash(h.Get(renderTimeHeader))
 
+	failed := 0
+	for _, f := range rec.fragments {
+		if f.Failed {
+			failed++
+		}
+	}
+
 	summary := []string{page, strconv.Itoa(status), renderTime}
+	if failed > 0 {
+		summary = append(summary, plural(failed, "failed fragment"))
+	}
 	if rec.rendered && rec.errors+rec.warnings > 0 {
 		summary = append(summary, strconv.Itoa(rec.errors+rec.warnings)+" findings")
 	}
 
-	rows := [][2]string{
-		{"Page", page},
-		{"Strategy", dash(rec.strategy)},
-		{"Status", strconv.Itoa(status) + " " + http.StatusText(status)},
-		{"Render time", renderTime},
-		{"Cache-Control", dash(h.Get("Cache-Control"))},
-		{"ETag", dash(h.Get("ETag"))},
-		{"Size", formatSize(size)},
-		{"Findings", findings},
+	rows := []row{
+		{name: "Page", value: page},
+		{name: "Strategy", value: dash(rec.strategy)},
+		{name: "Status", value: strconv.Itoa(status) + " " + http.StatusText(status)},
+		{name: "Render time", value: renderTime},
 	}
+	if rec.rendered {
+		count := plural(len(rec.fragments), "fragment")
+		if failed > 0 {
+			count += ", " + strconv.Itoa(failed) + " failed"
+		}
+		rows = append(rows, row{name: "Fragments", value: count})
+		// In the order they were entered: a fragment precedes the ones in its
+		// slots, whose time its own includes.
+		for _, f := range rec.fragments {
+			rows = append(rows, row{name: f.Name, value: fragmentOutcome(f), sub: true, failed: f.Failed})
+		}
+		tags := "none"
+		if len(rec.tags) > 0 {
+			tags = strings.Join(rec.tags, ", ")
+		}
+		rows = append(rows, row{name: "Dependency tags", value: tags})
+	}
+	rows = append(rows,
+		row{name: "Cache-Control", value: dash(h.Get("Cache-Control"))},
+		row{name: "ETag", value: dash(h.Get("ETag"))},
+		row{name: "Size", value: formatSize(size)},
+		row{name: "Findings", value: findings},
+	)
 	if rec.degraded {
-		rows = append(rows, [2]string{"Degraded", "a fragment failed"})
+		rows = append(rows, row{name: "Degraded", value: "a fragment failed"})
 	}
 
 	var b strings.Builder
@@ -244,13 +280,50 @@ func render(rec *record, status int, h http.Header, size int) []byte {
 	b.WriteString(`<details><summary><span class="cdt-brand">collage</span> `)
 	b.WriteString(html.EscapeString(strings.Join(summary, " · ")))
 	b.WriteString(`</summary><dl>`)
-	for _, row := range rows {
-		b.WriteString(`<dt>` + html.EscapeString(row[0]) + `</dt><dd>` + html.EscapeString(row[1]) + `</dd>`)
+	for _, r := range rows {
+		class := ""
+		switch {
+		case r.sub && r.failed:
+			class = ` class="cdt-sub cdt-failed"`
+		case r.sub:
+			class = ` class="cdt-sub"`
+		}
+		b.WriteString(`<dt` + class + `>` + html.EscapeString(r.name) + `</dt><dd` + class + `>` + html.EscapeString(r.value) + `</dd>`)
 	}
 	b.WriteString(`</dl></details>`)
 	b.WriteString(`<button type="button" class="cdt-close" aria-label="Close the development toolbar" onclick="this.parentNode.remove()">×</button>`)
 	b.WriteString(`</div>`)
 	return []byte(b.String())
+}
+
+// row is one line of the panel. A sub row belongs to the one above it: a
+// fragment under Fragments.
+type row struct {
+	name, value string
+	sub, failed bool
+}
+
+// fragmentOutcome is a fragment's time, and how it failed if it did.
+func fragmentOutcome(f collage.FragmentReport) string {
+	out := f.Duration.Round(time.Microsecond).String()
+	if !f.Failed {
+		return out
+	}
+	out += " · failed"
+	if f.UsedFallback {
+		out += ", fallback shown"
+	}
+	if f.Err != nil {
+		out += ": " + f.Err.Error()
+	}
+	return out
+}
+
+func plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return strconv.Itoa(n) + " " + noun + "s"
 }
 
 func formatSize(n int) string {
@@ -268,9 +341,11 @@ const style = `<style>
 #collage-devtoolbar details{padding:4px 8px;min-width:0}
 #collage-devtoolbar summary{cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #collage-devtoolbar .cdt-brand{color:#8fd18f;font-weight:bold}
-#collage-devtoolbar dl{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin-top:6px}
+#collage-devtoolbar dl{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin-top:6px;max-height:60vh;overflow:auto}
 #collage-devtoolbar dt{color:#a0a0a0}
 #collage-devtoolbar dd{word-break:break-all}
+#collage-devtoolbar dt.cdt-sub{padding-left:12px}
+#collage-devtoolbar .cdt-failed{color:#ff8a80}
 #collage-devtoolbar button{cursor:pointer;background:none;border:0;padding:4px 8px;font-size:14px;line-height:1}
 #collage-devtoolbar summary:focus-visible,#collage-devtoolbar button:focus-visible{outline:2px solid #8fd18f;outline-offset:1px}
 </style>`

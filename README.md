@@ -2,8 +2,9 @@
 
 A collage plugin that shows a small panel at the bottom of every page in
 development: which page rendered, in which locale, with what status, how long the
-render took, its `Cache-Control` and `ETag`, its size, and how many findings the
-checking plugins reported. In production and in a static build it does nothing at
+render and each of its fragments took, which fragments failed, the dependency tags
+the render depended on, its `Cache-Control` and `ETag`, its size, and how many
+findings the checking plugins reported. In production and in a static build it does nothing at
 all.
 
 ```go
@@ -16,14 +17,14 @@ app, err := collage.New(&collage.Config{
 })
 ```
 
-Requires collage v0.23.0 or later. It has nothing to configure.
+Requires collage v0.24.0 or later. It has nothing to configure.
 
 ## The panel
 
 Collapsed, it is one line in the corner:
 
 ```
-collage  home (en) · 200 · 1.84ms · 3 findings
+collage  home (en) · 200 · 1.84ms · 1 failed fragment · 3 findings
 ```
 
 Opened, it lists:
@@ -34,6 +35,8 @@ Opened, it lists:
 | Strategy | `static`, `dynamic` or `incremental` |
 | Status | the response's status |
 | Render time | `X-Collage-Render-Time`, which collage sets on a fresh render in development |
+| Fragments | how many ran and how many failed, then one line each: its time, and for a failed one whether its fallback was shown and the error. In the order they were entered, so a fragment comes before the ones in its slots, whose time its own includes |
+| Dependency tags | the tags the render depended on — the page's own and those its data handlers returned — or "none" |
 | Cache-Control, ETag | as collage sent them |
 | Size | the body collage wrote, before the panel was added |
 | Findings | errors and warnings the plugins before this one reported |
@@ -50,7 +53,7 @@ no font.
 ## How it works
 
 The middleware holds back every HTML response and puts the panel before its last
-`</body>`. What only the render knows — the page, the locale, the findings — the
+`</body>`. What only the render knows — the page, the locale, the fragments, the tags, the findings — the
 plugin's `OnAfterRender` notes in a record carried in the request's context, which
 the middleware reads once the response is complete. An event stream, an image, a
 JSON document, a compressed body and a hijacked connection pass straight through.
@@ -73,20 +76,27 @@ inline style and close button work; the browser's console will mention them.
 
 ## Limitations
 
-What a plugin can observe today is what is on the response and on the
-`AfterRender` event. The panel cannot show:
+What a plugin can observe is what is on the response and on the `AfterRender`
+event. The panel cannot show:
 
-- **Per-fragment timings.** collage reports them to `Metrics.FragmentDuration` only,
-  which is the application's, not a plugin's, and carries no request to tie a
-  timing to.
-- **Dependency tags.** The tags a render depended on are known to the render engine
-  and the cache, and are not on any page hook's event — only `RenderFragment`
-  returns them, for a fragment a plugin renders itself.
 - **Cache hits.** Development never reads the page cache, so every page is a fresh
   render; the panel says nothing about how production would serve it.
-
-Each would need a core hook — a per-request render report on `AfterRenderEvent`,
-with fragment timings and tags, would cover the first two.
+- **Where a fragment's time went.** A fragment's line is its wall-clock time,
+  slots included; its data handler and its template are not timed apart, and a
+  fragment rejected before it ran has no line.
+- **A document's render.** Fragments and tags come from a page's `AfterRender`; a
+  document, an asset or a handler shows only what its response carries.
 
 Because the whole HTML response is held back to add the panel, a page that streams
 its HTML arrives at once in development.
+
+## Changes
+
+### v0.2.0
+
+- The panel lists every fragment of the render with its time, and for one that
+  failed whether its fallback was shown and the error; the summary line counts
+  failed fragments. From collage v0.24.0's `AfterRenderEvent.Fragments`.
+- The panel shows the dependency tags the render depended on, from
+  `AfterRenderEvent.DependencyTags`.
+- Requires collage v0.24.0.

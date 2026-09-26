@@ -2,6 +2,7 @@ package devtoolbar_test
 
 import (
 	"context"
+	"errors"
 	"html"
 	"net/http"
 	"net/http/httptest"
@@ -38,7 +39,9 @@ func app(t *testing.T, dev bool, plugins ...collage.Plugin) *collage.App {
 		DevMode: dev,
 		Server:  collage.ServerConfig{Host: "localhost", Port: 3000},
 		Template: collage.TemplateConfig{FS: fstest.MapFS{
-			"t/p.html": {Data: []byte(page)},
+			"t/p.html":     {Data: []byte(page)},
+			"t/shell.html": {Data: []byte(`<!doctype html><html><body>{{slot "side"}}{{slot "main"}}</body></html>`)},
+			"t/part.html":  {Data: []byte(`<p>part</p>`)},
 		}, Root: "t"},
 		Plugins: plugins,
 	})
@@ -49,6 +52,20 @@ func app(t *testing.T, dev bool, plugins ...collage.Plugin) *collage.App {
 		t.Fatal(err)
 	}
 	if err := a.RegisterPage(collage.NewPage("x<y").WithContent(collage.NewFragment("xy", "p.html").Build()).WithPath("en", "/odd").Build()); err != nil {
+		t.Fatal(err)
+	}
+	side := collage.NewFragment("side", "part.html").WithDataHandler(
+		func(context.Context, *collage.RenderContext) (any, []string, error) { // any: DataHandlerFunc's own signature
+			return nil, nil, errors.New("backend down")
+		}).WithFallback(collage.NewFragment("side-fallback", "part.html").Build()).Build()
+	main := collage.NewFragment("main", "part.html").WithDataHandler(
+		func(context.Context, *collage.RenderContext) (any, []string, error) { // any: DataHandlerFunc's own signature
+			return nil, []string{"posts"}, nil
+		}).Build()
+	shell := collage.NewFragment("shell", "shell.html").
+		WithSlot("side", false, false).WithSlotFragment("side", side).
+		WithSlot("main", false, false).WithSlotFragment("main", main).Build()
+	if err := a.RegisterPage(collage.NewPage("mixed").WithContent(shell).WithPath("en", "/mixed").WithDependency("site").Build()); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.RegisterDocument(collage.NewDocument("data", "application/json").AtRoot("/data.json").WithBody([]byte(`{"a":1}`)).Build()); err != nil {
@@ -108,6 +125,37 @@ func TestPanelInDevelopment(t *testing.T) {
 	}
 	if strings.Contains(panel, "<script") || strings.Contains(panel, "http://") || strings.Contains(panel, "https://") {
 		t.Error("the panel loads something")
+	}
+}
+
+// Each fragment's time and failure, and the tags the render depended on.
+func TestFragmentsAndTags(t *testing.T) {
+	h := app(t, true, devtoolbar.New()).Handler()
+	body := do(h, http.MethodGet, "/mixed").Body.String()
+	at := strings.Index(body, `<div id="collage-devtoolbar"`)
+	if at < 0 {
+		t.Fatalf("no panel:\n%s", body)
+	}
+	panel := body[at:]
+	for _, want := range []string{
+		"1 failed fragment",
+		"<dt>Fragments</dt><dd>3 fragments, 1 failed</dd>",
+		`<dt class="cdt-sub">shell</dt>`,
+		`<dt class="cdt-sub">main</dt>`,
+		`<dt class="cdt-sub cdt-failed">side</dt>`,
+		"failed, fallback shown: ",
+		"backend down",
+		"<dt>Dependency tags</dt><dd>posts, site</dd>",
+		"<dt>Degraded</dt>",
+	} {
+		if !strings.Contains(panel, want) {
+			t.Errorf("panel lacks %q:\n%s", want, panel)
+		}
+	}
+	// A page with no tags says so, and no fragment failed.
+	home := do(h, http.MethodGet, "/").Body.String()
+	if !strings.Contains(home, "<dt>Dependency tags</dt><dd>none</dd>") || !strings.Contains(home, "<dd>1 fragment</dd>") || strings.Contains(home, `class="cdt-sub cdt-failed"`) || strings.Contains(home, "failed fragment") {
+		t.Errorf("home panel:\n%s", home[strings.Index(home, `<div id="collage-devtoolbar"`):])
 	}
 }
 
