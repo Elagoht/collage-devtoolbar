@@ -92,6 +92,12 @@ its HTML arrives at once in development.
 
 ## Changes
 
+### v0.2.1
+
+- `collage.json`: the plugin described to editors — its template functions,
+  snippets and configuration schema — for the Collage Snippets & Highlighter
+  extension and any tool reading it.
+
 ### v0.2.0
 
 - The panel lists every fragment of the render with its time, and for one that
