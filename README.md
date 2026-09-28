@@ -92,6 +92,16 @@ its HTML arrives at once in development.
 
 ## Changes
 
+### v0.2.3
+
+- A page written without a `Content-Type` — a handler mounted with `app.Handle`,
+  say — is given the panel. The type is sniffed from the first bytes, as net/http
+  does.
+
+### v0.2.2
+
+- The panel lands before `</body>` after non-ASCII text, such as Turkish İ.
+
 ### v0.2.1
 
 - `collage.json`: the plugin described to editors — its template functions,

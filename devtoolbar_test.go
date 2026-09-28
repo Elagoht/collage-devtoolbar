@@ -80,6 +80,13 @@ func app(t *testing.T, dev bool, plugins ...collage.Plugin) *collage.App {
 	})); err != nil {
 		t.Fatal(err)
 	}
+	if err := a.Handle("/undeclared", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte("<!doctype html><html><body><p>İstanbul</p>"))
+		_, _ = w.Write([]byte("</body></html>"))
+	})); err != nil {
+		t.Fatal(err)
+	}
 	return a
 }
 
@@ -189,6 +196,19 @@ func TestOtherResponsesPassThrough(t *testing.T) {
 	// passed on for net/http to discard.
 	if w := do(h, http.MethodHead, "/"); strings.Contains(w.Body.String(), "collage-devtoolbar") {
 		t.Errorf("HEAD was given the panel: %q", w.Body.String())
+	}
+}
+
+// A handler of the application's own that writes a page without saying it is
+// HTML — net/http sniffs the type below the middleware — is given the panel too.
+func TestUndeclaredHTML(t *testing.T) {
+	h := app(t, true, devtoolbar.New()).Handler()
+	w := do(h, http.MethodGet, "/undeclared")
+	if !strings.Contains(w.Body.String(), `id="collage-devtoolbar"`) || !strings.HasSuffix(w.Body.String(), "</div></body></html>") {
+		t.Errorf("no panel before </body>:\n%s", w.Body.String())
+	}
+	if w.Code != http.StatusAccepted || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/html") {
+		t.Errorf("status %d, Content-Type %q", w.Code, w.Header().Get("Content-Type"))
 	}
 }
 

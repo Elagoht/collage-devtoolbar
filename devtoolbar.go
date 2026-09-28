@@ -46,7 +46,7 @@ type Plugin struct {
 func New() *Plugin { return &Plugin{} }
 
 func (p *Plugin) Name() string                   { return Name }
-func (p *Plugin) Version() string                { return "0.2.2" }
+func (p *Plugin) Version() string                { return "0.2.3" }
 func (p *Plugin) Shutdown(context.Context) error { return nil }
 
 var (
@@ -128,6 +128,11 @@ func (p *Plugin) middleware(next http.Handler) http.Handler {
 // bufferWriter holds back an HTML body to put the panel in it. Anything else — an
 // event stream, an image, JSON, a compressed body — passes straight through, and
 // so does a hijacked connection.
+//
+// A response is HTML when its Content-Type says so, or, when it has none, when
+// its first bytes look like HTML: net/http sniffs a missing type the same way,
+// below every middleware. Until those first bytes arrive, a status written
+// without a type is held back rather than decided on.
 type bufferWriter struct {
 	http.ResponseWriter
 	head      bool
@@ -137,28 +142,48 @@ type bufferWriter struct {
 	body      bytes.Buffer
 }
 
-func (w *bufferWriter) decide() {
+// decide settles whether the response is held back, from its Content-Type or,
+// when it has none, from first, the first bytes written. The sniffed type is
+// set on the response, so what net/http would have said is said here.
+func (w *bufferWriter) decide(first []byte) {
 	if w.decided {
 		return
 	}
 	w.decided = true
 	h := w.Header()
+	if _, declared := h["Content-Type"]; !declared && len(first) > 0 && h.Get("Content-Encoding") == "" {
+		h.Set("Content-Type", http.DetectContentType(first))
+	}
 	w.buffering = strings.HasPrefix(h.Get("Content-Type"), "text/html") && h.Get("Content-Encoding") == ""
+	if !w.buffering && w.status != 0 {
+		w.ResponseWriter.WriteHeader(w.status)
+	}
 }
 
 func (w *bufferWriter) WriteHeader(status int) {
-	w.decide()
-	if w.buffering {
-		if w.status == 0 {
+	// Informational: early hints, a protocol switch. Not the response itself.
+	if status < http.StatusOK {
+		w.ResponseWriter.WriteHeader(status)
+		return
+	}
+	if w.decided {
+		if !w.buffering {
+			w.ResponseWriter.WriteHeader(status)
+		} else if w.status == 0 {
 			w.status = status
 		}
 		return
 	}
-	w.ResponseWriter.WriteHeader(status)
+	if w.status == 0 {
+		w.status = status
+	}
+	if _, declared := w.Header()["Content-Type"]; declared {
+		w.decide(nil)
+	}
 }
 
 func (w *bufferWriter) Write(b []byte) (int, error) {
-	w.decide()
+	w.decide(b)
 	if w.buffering {
 		return w.body.Write(b)
 	}
@@ -167,7 +192,7 @@ func (w *bufferWriter) Write(b []byte) (int, error) {
 
 // Flush passes a flush through when nothing is held back.
 func (w *bufferWriter) Flush() {
-	w.decide()
+	w.decide(nil)
 	if !w.buffering {
 		_ = http.NewResponseController(w.ResponseWriter).Flush()
 	}
@@ -178,6 +203,8 @@ func (w *bufferWriter) Flush() {
 func (w *bufferWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func (w *bufferWriter) finish(rec *record) {
+	// Only a status was written, and nothing to sniff: it goes out as it was.
+	w.decide(nil)
 	if !w.buffering {
 		return
 	}
