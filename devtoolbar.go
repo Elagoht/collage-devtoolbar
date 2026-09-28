@@ -46,7 +46,7 @@ type Plugin struct {
 func New() *Plugin { return &Plugin{} }
 
 func (p *Plugin) Name() string                   { return Name }
-func (p *Plugin) Version() string                { return "0.2.1" }
+func (p *Plugin) Version() string                { return "0.2.2" }
 func (p *Plugin) Shutdown(context.Context) error { return nil }
 
 var (
@@ -202,8 +202,19 @@ func (w *bufferWriter) finish(rec *record) {
 
 // lastBodyClose finds the page's closing body tag, in any case. The last one, since
 // a script or a comment earlier in the page may spell one out.
+//
+// Only ASCII is lowercased. bytes.ToLower does not keep lengths — Turkish İ is two
+// bytes and lowercases to i, one — and an index into its result is not an index
+// into body: each İ would put the panel a byte earlier, into the tag before.
 func lastBodyClose(body []byte) int {
-	return bytes.LastIndex(bytes.ToLower(body), []byte("</body>"))
+	lower := make([]byte, len(body))
+	for i, c := range body {
+		if 'A' <= c && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		lower[i] = c
+	}
+	return bytes.LastIndex(lower, []byte("</body>"))
 }
 
 func render(rec *record, status int, h http.Header, size int) []byte {
