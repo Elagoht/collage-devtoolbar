@@ -92,6 +92,12 @@ its HTML arrives at once in development.
 
 ## Changes
 
+### v0.2.4
+
+- Requires collage v0.49.0. Tests only: the test site gives its fragments
+  typed data with `collage.Load` and `collage.DataHandler`, since
+  `WithDataHandler` is gone. The plugin itself is unchanged.
+
 ### v0.2.3
 
 - A page written without a `Content-Type` — a handler mounted with `app.Handle`,

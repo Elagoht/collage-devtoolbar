@@ -54,14 +54,14 @@ func app(t *testing.T, dev bool, plugins ...collage.Plugin) *collage.App {
 	if err := a.RegisterPage(collage.NewPage("x<y").WithContent(collage.NewFragment("xy", "p.html").Build()).WithPath("en", "/odd").Build()); err != nil {
 		t.Fatal(err)
 	}
-	side := collage.NewFragment("side", "part.html").WithDataHandler(
-		func(context.Context, *collage.RenderContext) (any, []string, error) { // any: DataHandlerFunc's own signature
-			return nil, nil, errors.New("backend down")
-		}).WithFallback(collage.NewFragment("side-fallback", "part.html").Build()).Build()
-	main := collage.NewFragment("main", "part.html").WithDataHandler(
-		func(context.Context, *collage.RenderContext) (any, []string, error) { // any: DataHandlerFunc's own signature
-			return nil, []string{"posts"}, nil
-		}).Build()
+	side := collage.NewFragment("side", "part.html").WithData(collage.Load(
+		func(context.Context, *collage.RenderContext) (string, error) {
+			return "", errors.New("backend down")
+		})).WithFallback(collage.NewFragment("side-fallback", "part.html").Build()).Build()
+	main := collage.NewFragment("main", "part.html").WithData(collage.DataHandler(
+		func(context.Context, *collage.RenderContext) (string, []string, error) {
+			return "", []string{"posts"}, nil
+		})).Build()
 	shell := collage.NewFragment("shell", "shell.html").
 		WithSlot("side", false, false).WithSlotFragment("side", side).
 		WithSlot("main", false, false).WithSlotFragment("main", main).Build()
