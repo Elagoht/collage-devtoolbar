@@ -104,3 +104,22 @@ func TestAllowRemote(t *testing.T) {
 		}
 	}
 }
+
+// Behind a proxy collage trusts, the client is the one the proxy names: a public
+// visitor reaching a development server through nginx on the same machine gets
+// no panel. From a peer that is not trusted, X-Forwarded-For is a header anyone
+// can write, so it changes nothing.
+func TestTrustedProxyNamesTheClient(t *testing.T) {
+	h := appWith(t, true, func(c *collage.Config) {
+		c.Server.TrustedProxies = []string{"127.0.0.1"}
+	}, devtoolbar.New()).Handler()
+	if w := from(h, "127.0.0.1:1", "/", "X-Forwarded-For", "203.0.113.5"); strings.Contains(w.Body.String(), panelMark) {
+		t.Error("panel for a public client behind a trusted proxy")
+	}
+	if w := from(h, "127.0.0.1:1", "/", "X-Forwarded-For", "192.168.1.20"); !strings.Contains(w.Body.String(), panelMark) {
+		t.Error("no panel for a LAN client behind a trusted proxy")
+	}
+	if w := from(h, "10.0.0.7:1", "/", "X-Forwarded-For", "203.0.113.5"); !strings.Contains(w.Body.String(), panelMark) {
+		t.Error("a forged X-Forwarded-For from an untrusted peer hid the panel")
+	}
+}

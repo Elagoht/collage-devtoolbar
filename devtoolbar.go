@@ -28,7 +28,6 @@ import (
 	"html"
 	"log/slog"
 	"net/http"
-	"net/netip"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -45,11 +44,11 @@ const renderTimeHeader = "X-Collage-Render-Time"
 
 // Options configures the plugin.
 type Options struct {
-	// AllowRemote shows the panel to every peer. By default only a peer on the
-	// developer's machine or a private network sees it (loopback, RFC 1918,
-	// IPv6 unique-local and link-local addresses): a request from anywhere else
-	// means development mode is serving the public, and its responses go out
-	// untouched.
+	// AllowRemote shows the panel to every client. By default only a client on
+	// the developer's machine or a private network sees it (loopback, RFC 1918,
+	// IPv6 unique-local and link-local addresses, as collage.ClientIP names the
+	// client): a request from anywhere else means development mode is serving
+	// the public, and its responses go out untouched.
 	AllowRemote bool `json:"allowRemote"`
 }
 
@@ -94,17 +93,14 @@ func (p *Plugin) Init(_ context.Context, host collage.Host) error {
 	return host.Use(p.middleware)
 }
 
-// local reports whether the direct peer is on the developer's machine or a
-// private network: loopback, RFC 1918, IPv6 unique-local, link-local. It is
-// the connection's own address, never a forwarding header a client can write;
-// a reverse proxy in development runs on such an address itself. An address
-// that does not parse is not local.
-func local(remoteAddr string) bool {
-	ap, err := netip.ParseAddrPort(remoteAddr)
-	if err != nil {
-		return false
-	}
-	a := ap.Addr().Unmap()
+// local reports whether the client is on the developer's machine or a private
+// network: loopback, RFC 1918, IPv6 unique-local, link-local. The client is
+// collage.ClientIP's: the connection's own address, or, behind a proxy listed in
+// Server.TrustedProxies, the address that proxy forwarded for. An untrusted
+// peer's X-Forwarded-For is never read, and a client collage cannot name is
+// not local.
+func local(r *http.Request) bool {
+	a := collage.ClientIP(r)
 	return a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast()
 }
 
@@ -158,7 +154,7 @@ func (p *Plugin) OnAfterRender(ctx context.Context, ev *collage.AfterRenderEvent
 
 func (p *Plugin) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !p.opts.AllowRemote && !local(r.RemoteAddr) {
+		if !p.opts.AllowRemote && !local(r) {
 			if p.warned.CompareAndSwap(false, true) {
 				p.log.Warn("devtoolbar: DevMode is serving a non-local peer; the panel is off for it",
 					"peer", r.RemoteAddr)

@@ -94,10 +94,15 @@ exactly as it would without the plugin, and the first one logs a warning:
 WARN devtoolbar: DevMode is serving a non-local peer; the panel is off for it peer=203.0.113.5:4000
 ```
 
-The address checked is the connection's own, never `X-Forwarded-For`, which a
-client can write. A reverse proxy in front of a development server runs on such
-an address itself. If the proxy is on another machine and should show the panel,
-turn the check off:
+The address checked is `collage.ClientIP`'s. That is the connection's own address,
+or, behind a proxy listed in `Server.TrustedProxies`, the client that proxy
+forwarded for. A development server behind nginx on the same machine therefore
+shows the panel only to local clients, provided the proxy is listed. Without
+`TrustedProxies`, `X-Forwarded-For` is never read, because a client can write it.
+
+A tailnet or carrier-grade NAT address (`100.64.0.0/10`) is not a private network,
+so a phone reaching the machine over Tailscale gets no panel. To show it to
+remote peers, turn the check off:
 
 ```go
 devtoolbar.NewWith(devtoolbar.Options{AllowRemote: true})
