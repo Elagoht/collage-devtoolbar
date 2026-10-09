@@ -2,5 +2,16 @@
   "$schema": "https://raw.githubusercontent.com/Elagoht/collage-snippets-highlighter/main/schemas/collage-plugin-manifest.schema.json",
   "name": "elagoht/devtoolbar",
   "description": "A collage plugin that shows a small panel at the bottom of every page in development.",
-  "repository": "https://github.com/Elagoht/collage-devtoolbar"
+  "repository": "https://github.com/Elagoht/collage-devtoolbar",
+  "config": {
+    "type": "object",
+    "description": "A collage plugin that shows a small panel at the bottom of every page in development.",
+    "properties": {
+      "allowRemote": {
+        "type": "boolean",
+        "description": "AllowRemote shows the panel to every peer. By default only a peer on the developer's machine or a private network sees it (loopback, RFC 1918, IPv6 unique-local and link-local addresses): a request from anywhere else means development mode is serving the public, and its responses go out untouched."
+      }
+    },
+    "additionalProperties": false
+  }
 }

@@ -17,7 +17,7 @@ app, err := collage.New(&collage.Config{
 })
 ```
 
-Requires collage v0.24.0 or later. It has nothing to configure.
+Requires collage v0.57.0 or later.
 
 ## The panel
 
@@ -71,6 +71,45 @@ it.
 - In a static build nothing is added, even from a development application: the
   hook sees `ev.Static` and returns, and the build never runs middleware.
 
+## Local peers only
+
+The panel shows every visitor how the site is built: its pages, fragments, timings,
+dependency tags and failures. It also takes the conditional headers off every
+request, so each one is rendered in full. It is meant for the developer, so in
+development the plugin answers only a peer on the developer's machine or a
+private network:
+
+- loopback (`127.0.0.0/8`, `::1`);
+- private networks (`10/8`, `172.16/12`, `192.168/16`, IPv6 `fc00::/7`), which
+  covers a Docker bridge and a phone on the LAN;
+- link-local addresses (`169.254/16`, `fe80::/10`).
+
+`collage dev` reaches the application from loopback, so it is covered.
+
+A request from any other address means development mode is serving the public, by
+mistake or through a host added to `COLLAGE_DEV_HOST`. Such a response goes out
+exactly as it would without the plugin, and the first one logs a warning:
+
+```
+WARN devtoolbar: DevMode is serving a non-local peer; the panel is off for it peer=203.0.113.5:4000
+```
+
+The address checked is the connection's own, never `X-Forwarded-For`, which a
+client can write. A reverse proxy in front of a development server runs on such
+an address itself. If the proxy is on another machine and should show the panel,
+turn the check off:
+
+```go
+devtoolbar.NewWith(devtoolbar.Options{AllowRemote: true})
+```
+
+```json
+{ "elagoht/devtoolbar": { "allowRemote": true } }
+```
+
+This sits behind collage's own guard: since v0.56.0, development mode refuses a
+`Host` that does not name the machine.
+
 If collage-secure's policy is on, it is report-only in development, so the panel's
 inline style and close button work; the browser's console will mention them.
 
@@ -91,6 +130,16 @@ Because the whole HTML response is held back to add the panel, a page that strea
 its HTML arrives at once in development.
 
 ## Changes
+
+### v0.3.0
+
+- **Local peers only.** In development the panel is drawn only for a peer on the
+  developer's machine or a private network (loopback, RFC 1918, IPv6
+  unique-local, link-local). Any other peer gets the response untouched, and the
+  first one logs a warning. `Options.AllowRemote` (`allowRemote`) turns the check
+  off.
+- `NewWith(Options)`; the plugin reads its section of the plugin configuration.
+- Requires collage v0.57.0.
 
 ### v0.2.4
 

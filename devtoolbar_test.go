@@ -35,7 +35,13 @@ const page = `<!doctype html><html><head><title>t</title></head><body><main>hell
 
 func app(t *testing.T, dev bool, plugins ...collage.Plugin) *collage.App {
 	t.Helper()
-	a, err := collage.New(&collage.Config{
+	return appWith(t, dev, nil, plugins...)
+}
+
+// appWith is app with a last say over the configuration.
+func appWith(t *testing.T, dev bool, edit func(*collage.Config), plugins ...collage.Plugin) *collage.App {
+	t.Helper()
+	cfg := &collage.Config{
 		DevMode: dev,
 		Server:  collage.ServerConfig{Host: "localhost", Port: 3000},
 		Template: collage.TemplateConfig{FS: fstest.MapFS{
@@ -44,7 +50,11 @@ func app(t *testing.T, dev bool, plugins ...collage.Plugin) *collage.App {
 			"t/part.html":  {Data: []byte(`<p>part</p>`)},
 		}, Root: "t"},
 		Plugins: plugins,
-	})
+	}
+	if edit != nil {
+		edit(cfg)
+	}
+	a, err := collage.New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,6 +90,12 @@ func app(t *testing.T, dev bool, plugins ...collage.Plugin) *collage.App {
 	})); err != nil {
 		t.Fatal(err)
 	}
+	if err := a.Handle("/inm", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte("<!doctype html><html><body>" + html.EscapeString(r.Header.Get("If-None-Match")) + "</body></html>"))
+	})); err != nil {
+		t.Fatal(err)
+	}
 	if err := a.Handle("/undeclared", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 		_, _ = w.Write([]byte("<!doctype html><html><body><p>İstanbul</p>"))
@@ -92,6 +108,7 @@ func app(t *testing.T, dev bool, plugins ...collage.Plugin) *collage.App {
 
 func do(h http.Handler, method, path string, header ...string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(method, path, nil)
+	r.RemoteAddr = "127.0.0.1:52000" // the developer's own machine
 	for i := 0; i+1 < len(header); i += 2 {
 		r.Header.Set(header[i], header[i+1])
 	}

@@ -12,6 +12,10 @@
 // and how many findings the plugins before it reported. Register it last: a render's findings
 // are only those of the plugins that ran before it.
 //
+// In development it draws the panel only for a peer on the developer's machine or
+// a private network, unless Options.AllowRemote is set: any other peer means
+// development mode is serving the public, and gets the response untouched.
+//
 // Outside development it does nothing at all: no middleware is installed, no hook
 // does any work, and a static build renders every page exactly as it would
 // without it.
@@ -22,9 +26,12 @@ import (
 	"context"
 	"fmt"
 	"html"
+	"log/slog"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Elagoht/collage/pkg/collage"
@@ -36,17 +43,35 @@ const Name = "elagoht/devtoolbar"
 // renderTimeHeader is the header collage sets on a fresh render in development.
 const renderTimeHeader = "X-Collage-Render-Time"
 
-// Plugin draws the panel.
-type Plugin struct {
-	dev bool
+// Options configures the plugin.
+type Options struct {
+	// AllowRemote shows the panel to every peer. By default only a peer on the
+	// developer's machine or a private network sees it (loopback, RFC 1918,
+	// IPv6 unique-local and link-local addresses): a request from anywhere else
+	// means development mode is serving the public, and its responses go out
+	// untouched.
+	AllowRemote bool `json:"allowRemote"`
 }
 
-// New returns the plugin. It has nothing to configure: in development it is on,
-// and everywhere else it is off.
+// Plugin draws the panel.
+type Plugin struct {
+	opts   Options
+	dev    bool
+	log    *slog.Logger
+	warned atomic.Bool
+}
+
+// New returns the plugin with default options, which the application's plugin
+// configuration may override. In development it is on, and everywhere else it
+// is off.
 func New() *Plugin { return &Plugin{} }
 
+// NewWith returns the plugin with opts, which the application's plugin
+// configuration may still override.
+func NewWith(opts Options) *Plugin { return &Plugin{opts: opts} }
+
 func (p *Plugin) Name() string                   { return Name }
-func (p *Plugin) Version() string                { return "0.2.4" }
+func (p *Plugin) Version() string                { return "0.3.0" }
 func (p *Plugin) Shutdown(context.Context) error { return nil }
 
 var (
@@ -56,11 +81,31 @@ var (
 
 // Init installs the middleware in development, and nothing otherwise.
 func (p *Plugin) Init(_ context.Context, host collage.Host) error {
+	opts, err := collage.PluginConfig(host, p.opts)
+	if err != nil {
+		return err
+	}
+	p.opts = opts
+	p.log = host.Logger()
 	p.dev = host.DevMode()
 	if !p.dev {
 		return nil
 	}
 	return host.Use(p.middleware)
+}
+
+// local reports whether the direct peer is on the developer's machine or a
+// private network: loopback, RFC 1918, IPv6 unique-local, link-local. It is
+// the connection's own address, never a forwarding header a client can write;
+// a reverse proxy in development runs on such an address itself. An address
+// that does not parse is not local.
+func local(remoteAddr string) bool {
+	ap, err := netip.ParseAddrPort(remoteAddr)
+	if err != nil {
+		return false
+	}
+	a := ap.Addr().Unmap()
+	return a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast()
 }
 
 // record is what the render told the plugin about one request, carried from
@@ -113,6 +158,14 @@ func (p *Plugin) OnAfterRender(ctx context.Context, ev *collage.AfterRenderEvent
 
 func (p *Plugin) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !p.opts.AllowRemote && !local(r.RemoteAddr) {
+			if p.warned.CompareAndSwap(false, true) {
+				p.log.Warn("devtoolbar: DevMode is serving a non-local peer; the panel is off for it",
+					"peer", r.RemoteAddr)
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
 		// Every request is answered in full, so the panel on the page is the
 		// panel for this response: a 304 would have the browser show the page it
 		// kept, with the timings of whichever request first sent it.
