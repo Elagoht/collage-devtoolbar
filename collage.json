@@ -9,7 +9,7 @@
     "properties": {
       "allowRemote": {
         "type": "boolean",
-        "description": "AllowRemote shows the panel to every peer. By default only a peer on the developer's machine or a private network sees it (loopback, RFC 1918, IPv6 unique-local and link-local addresses): a request from anywhere else means development mode is serving the public, and its responses go out untouched."
+        "description": "AllowRemote shows the panel to every client. By default only a client on the developer's machine or a private network sees it (loopback, RFC 1918, IPv6 unique-local and link-local addresses, as collage.ClientIP names the client): a request from anywhere else means development mode is serving the public, and its responses go out untouched."
       }
     },
     "additionalProperties": false
