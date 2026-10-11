@@ -70,7 +70,7 @@ func New() *Plugin { return &Plugin{} }
 func NewWith(opts Options) *Plugin { return &Plugin{opts: opts} }
 
 func (p *Plugin) Name() string                   { return Name }
-func (p *Plugin) Version() string                { return "0.3.0" }
+func (p *Plugin) Version() string                { return "0.3.1" }
 func (p *Plugin) Shutdown(context.Context) error { return nil }
 
 var (

@@ -17,7 +17,7 @@ app, err := collage.New(&collage.Config{
 })
 ```
 
-Requires collage v0.57.0 or later.
+Requires collage v0.58.0 or later.
 
 ## The panel
 
@@ -135,6 +135,12 @@ Because the whole HTML response is held back to add the panel, a page that strea
 its HTML arrives at once in development.
 
 ## Changes
+
+### v0.3.1
+
+- collage.json has `order` 100, so `collage plugin add` lists it last, so it
+  sees the other plugins' findings.
+- Requires collage v0.58.0.
 
 ### v0.3.0
 

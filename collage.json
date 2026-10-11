@@ -3,6 +3,7 @@
   "name": "elagoht/devtoolbar",
   "description": "A collage plugin that shows a small panel at the bottom of every page in development.",
   "repository": "https://github.com/Elagoht/collage-devtoolbar",
+  "order": 100,
   "config": {
     "type": "object",
     "description": "A collage plugin that shows a small panel at the bottom of every page in development.",
