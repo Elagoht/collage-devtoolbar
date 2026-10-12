@@ -136,6 +136,11 @@ its HTML arrives at once in development.
 
 ## Changes
 
+### v0.3.2
+
+- Rebuilt against collage v0.60.0; the plugin's code is unchanged.
+- Requires collage v0.60.0.
+
 ### v0.3.1
 
 - collage.json has `order` 100, so `collage plugin add` lists it last, so it

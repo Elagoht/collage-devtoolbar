@@ -68,14 +68,14 @@ func appWith(t *testing.T, dev bool, edit func(*collage.Config), plugins ...coll
 		func(context.Context, *collage.RenderContext) (string, error) {
 			return "", errors.New("backend down")
 		})).WithFallback(collage.NewFragment("side-fallback", "part.html").Build()).Build()
-	main := collage.NewFragment("main", "part.html").WithData(collage.DataHandler(
+	main := collage.NewFragment("main", "part.html").WithData(collage.LoadTagged(
 		func(context.Context, *collage.RenderContext) (string, []string, error) {
 			return "", []string{"posts"}, nil
 		})).Build()
 	shell := collage.NewFragment("shell", "shell.html").
-		WithSlot("side", false, false).WithSlotFragment("side", side).
-		WithSlot("main", false, false).WithSlotFragment("main", main).Build()
-	if err := a.RegisterPage(collage.NewPage("mixed").WithContent(shell).WithPath("en", "/mixed").WithDependency("site").Build()); err != nil {
+		WithSlot("side", collage.SlotSingle).WithSlotFragment("side", side).
+		WithSlot("main", collage.SlotSingle).WithSlotFragment("main", main).Build()
+	if err := a.RegisterPage(collage.NewPage("mixed").WithContent(shell).WithPath("en", "/mixed").WithDependencyTags("site").Build()); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.RegisterDocument(collage.NewDocument("data", "application/json").AtRoot("/data.json").WithBody([]byte(`{"a":1}`)).Build()); err != nil {
@@ -246,11 +246,7 @@ func TestNothingInProduction(t *testing.T) {
 func TestNothingInAStaticBuild(t *testing.T) {
 	for _, dev := range []bool{false, true} {
 		out := t.TempDir()
-		b, err := collage.NewBuilder(app(t, dev, devtoolbar.New()), collage.BuildOptions{OutDir: out})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := b.Build(context.Background()); err != nil {
+		if _, err := collage.Build(context.Background(), app(t, dev, devtoolbar.New()), collage.BuildOptions{OutDir: out}); err != nil {
 			t.Fatal(err)
 		}
 		written, err := os.ReadFile(filepath.Join(out, "index.html"))
