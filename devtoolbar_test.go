@@ -118,7 +118,7 @@ func do(h http.Handler, method, path string, header ...string) *httptest.Respons
 }
 
 func TestPanelInDevelopment(t *testing.T) {
-	h := app(t, true, checker{}, devtoolbar.New()).Handler()
+	h := app(t, true, checker{}, devtoolbar.New(devtoolbar.Options{})).Handler()
 	w := do(h, http.MethodGet, "/")
 	body := w.Body.String()
 	at := strings.Index(body, `<div id="collage-devtoolbar"`)
@@ -154,7 +154,7 @@ func TestPanelInDevelopment(t *testing.T) {
 
 // Each fragment's time and failure, and the tags the render depended on.
 func TestFragmentsAndTags(t *testing.T) {
-	h := app(t, true, devtoolbar.New()).Handler()
+	h := app(t, true, devtoolbar.New(devtoolbar.Options{})).Handler()
 	body := do(h, http.MethodGet, "/mixed").Body.String()
 	at := strings.Index(body, `<div id="collage-devtoolbar"`)
 	if at < 0 {
@@ -185,7 +185,7 @@ func TestFragmentsAndTags(t *testing.T) {
 
 // Values in the panel are text, however a page is named.
 func TestPanelEscapes(t *testing.T) {
-	h := app(t, true, devtoolbar.New()).Handler()
+	h := app(t, true, devtoolbar.New(devtoolbar.Options{})).Handler()
 	body := do(h, http.MethodGet, "/odd").Body.String()
 	if !strings.Contains(body, "x&lt;y (en)") || strings.Contains(body, "x<y") {
 		t.Errorf("page name not escaped:\n%s", body)
@@ -194,7 +194,7 @@ func TestPanelEscapes(t *testing.T) {
 
 // Every request is answered in full, so the panel is this response's.
 func TestNoRevalidationUnderThePanel(t *testing.T) {
-	h := app(t, true, devtoolbar.New()).Handler()
+	h := app(t, true, devtoolbar.New(devtoolbar.Options{})).Handler()
 	etag := do(h, http.MethodGet, "/").Header().Get("ETag")
 	if w := do(h, http.MethodGet, "/", "If-None-Match", etag); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "collage-devtoolbar") {
 		t.Errorf("status %d", w.Code)
@@ -202,7 +202,7 @@ func TestNoRevalidationUnderThePanel(t *testing.T) {
 }
 
 func TestOtherResponsesPassThrough(t *testing.T) {
-	h := app(t, true, devtoolbar.New()).Handler()
+	h := app(t, true, devtoolbar.New(devtoolbar.Options{})).Handler()
 	if w := do(h, http.MethodGet, "/data.json"); w.Body.String() != `{"a":1}` || w.Header().Get("ETag") == "" {
 		t.Errorf("document = %q", w.Body.String())
 	}
@@ -219,7 +219,7 @@ func TestOtherResponsesPassThrough(t *testing.T) {
 // A handler of the application's own that writes a page without saying it is
 // HTML — net/http sniffs the type below the middleware — is given the panel too.
 func TestUndeclaredHTML(t *testing.T) {
-	h := app(t, true, devtoolbar.New()).Handler()
+	h := app(t, true, devtoolbar.New(devtoolbar.Options{})).Handler()
 	w := do(h, http.MethodGet, "/undeclared")
 	if !strings.Contains(w.Body.String(), `id="collage-devtoolbar"`) || !strings.HasSuffix(w.Body.String(), "</div></body></html>") {
 		t.Errorf("no panel before </body>:\n%s", w.Body.String())
@@ -231,7 +231,7 @@ func TestUndeclaredHTML(t *testing.T) {
 
 // Outside development the plugin is not there at all.
 func TestNothingInProduction(t *testing.T) {
-	with := do(app(t, false, devtoolbar.New()).Handler(), http.MethodGet, "/")
+	with := do(app(t, false, devtoolbar.New(devtoolbar.Options{})).Handler(), http.MethodGet, "/")
 	without := do(app(t, false).Handler(), http.MethodGet, "/")
 	if with.Body.String() != without.Body.String() || with.Header().Get("ETag") != without.Header().Get("ETag") {
 		t.Errorf("production differs:\n%s\n%s", with.Body.String(), without.Body.String())
@@ -246,7 +246,7 @@ func TestNothingInProduction(t *testing.T) {
 func TestNothingInAStaticBuild(t *testing.T) {
 	for _, dev := range []bool{false, true} {
 		out := t.TempDir()
-		if _, err := collage.Build(context.Background(), app(t, dev, devtoolbar.New()), collage.BuildOptions{OutDir: out}); err != nil {
+		if _, err := collage.Build(context.Background(), app(t, dev, devtoolbar.New(devtoolbar.Options{})), collage.BuildOptions{OutDir: out}); err != nil {
 			t.Fatal(err)
 		}
 		written, err := os.ReadFile(filepath.Join(out, "index.html"))

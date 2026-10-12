@@ -12,12 +12,12 @@ app, err := collage.New(&collage.Config{
 	DevMode: devMode,
 	Plugins: []collage.Plugin{
 		htmlcheck.New(htmlcheck.Options{}),
-		devtoolbar.New(), // last
+		devtoolbar.New(devtoolbar.Options{}), // last
 	},
 })
 ```
 
-Requires collage v0.58.0 or later.
+Requires collage v0.61.0 or later.
 
 ## The panel
 
@@ -105,7 +105,7 @@ so a phone reaching the machine over Tailscale gets no panel. To show it to
 remote peers, turn the check off:
 
 ```go
-devtoolbar.NewWith(devtoolbar.Options{AllowRemote: true})
+devtoolbar.New(devtoolbar.Options{AllowRemote: true})
 ```
 
 ```json
@@ -135,6 +135,15 @@ Because the whole HTML response is held back to add the panel, a page that strea
 its HTML arrives at once in development.
 
 ## Changes
+
+### v0.4.0
+
+Changed in v0.4.0:
+
+- `New()` and `NewWith(opts)` are one constructor, `New(opts Options)`: write
+  `devtoolbar.New(devtoolbar.Options{})` for `New()`, and
+  `devtoolbar.New(opts)` for `NewWith(opts)`.
+- Requires collage v0.61.0.
 
 ### v0.3.2
 

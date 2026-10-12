@@ -30,7 +30,7 @@ const panelMark = `<div id="collage-devtoolbar"`
 // The panel is for the developer's machine and the networks it sits on: loopback,
 // a Docker bridge, the LAN a phone tests from.
 func TestPanelForLocalPeers(t *testing.T) {
-	h := app(t, true, devtoolbar.New()).Handler()
+	h := app(t, true, devtoolbar.New(devtoolbar.Options{})).Handler()
 	for _, addr := range []string{
 		"127.0.0.1:1", "127.8.9.10:1", "[::1]:1",
 		"10.0.0.5:1", "172.17.0.1:1", "192.168.1.20:1",
@@ -48,7 +48,7 @@ func TestPanelForLocalPeers(t *testing.T) {
 // reaches the application with its conditional headers.
 func TestRemotePeerUntouched(t *testing.T) {
 	plain := app(t, true).Handler()
-	h := app(t, true, devtoolbar.New()).Handler()
+	h := app(t, true, devtoolbar.New(devtoolbar.Options{})).Handler()
 	for _, addr := range []string{"203.0.113.5:4000", "[2001:db8::5]:4000", "172.32.0.1:1", "garbage"} {
 		if w := from(h, addr, "/"); w.Code != http.StatusOK || strings.Contains(w.Body.String(), panelMark) {
 			t.Errorf("%s: %d, panel %v", addr, w.Code, strings.Contains(w.Body.String(), panelMark))
@@ -75,7 +75,7 @@ func TestRemotePeerWarnsOnce(t *testing.T) {
 	var buf bytes.Buffer
 	h := appWith(t, true, func(c *collage.Config) {
 		c.Logger = slog.New(slog.NewTextHandler(&buf, nil))
-	}, devtoolbar.New()).Handler()
+	}, devtoolbar.New(devtoolbar.Options{})).Handler()
 	from(h, "127.0.0.1:1", "/")
 	if strings.Contains(buf.String(), "devtoolbar") {
 		t.Fatalf("warned for a local peer:\n%s", buf.String())
@@ -90,14 +90,14 @@ func TestRemotePeerWarnsOnce(t *testing.T) {
 
 // AllowRemote turns the check off, from Go or from configuration.
 func TestAllowRemote(t *testing.T) {
-	fromGo := app(t, true, devtoolbar.NewWith(devtoolbar.Options{AllowRemote: true})).Handler()
+	fromGo := app(t, true, devtoolbar.New(devtoolbar.Options{AllowRemote: true})).Handler()
 	raw, err := json.Marshal(map[string]bool{"allowRemote": true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	fromConfig := appWith(t, true, func(c *collage.Config) {
 		c.PluginConfig = map[string]json.RawMessage{devtoolbar.Name: raw}
-	}, devtoolbar.New()).Handler()
+	}, devtoolbar.New(devtoolbar.Options{})).Handler()
 	for name, h := range map[string]http.Handler{"go": fromGo, "config": fromConfig} {
 		if w := from(h, "203.0.113.5:1", "/"); !strings.Contains(w.Body.String(), panelMark) {
 			t.Errorf("%s: no panel for a remote peer with AllowRemote", name)
@@ -112,7 +112,7 @@ func TestAllowRemote(t *testing.T) {
 func TestTrustedProxyNamesTheClient(t *testing.T) {
 	h := appWith(t, true, func(c *collage.Config) {
 		c.Server.TrustedProxies = []string{"127.0.0.1"}
-	}, devtoolbar.New()).Handler()
+	}, devtoolbar.New(devtoolbar.Options{})).Handler()
 	if w := from(h, "127.0.0.1:1", "/", "X-Forwarded-For", "203.0.113.5"); strings.Contains(w.Body.String(), panelMark) {
 		t.Error("panel for a public client behind a trusted proxy")
 	}

@@ -3,7 +3,7 @@
 //
 //	app, err := collage.New(&collage.Config{
 //		DevMode: true,
-//		Plugins: []collage.Plugin{ /* ...every other plugin... */ devtoolbar.New()},
+//		Plugins: []collage.Plugin{ /* ...every other plugin... */ devtoolbar.New(devtoolbar.Options{})},
 //	})
 //
 // The panel says which page rendered and in which locale, the response's status,
@@ -60,17 +60,13 @@ type Plugin struct {
 	warned atomic.Bool
 }
 
-// New returns the plugin with default options, which the application's plugin
-// configuration may override. In development it is on, and everywhere else it
-// is off.
-func New() *Plugin { return &Plugin{} }
-
-// NewWith returns the plugin with opts, which the application's plugin
-// configuration may still override.
-func NewWith(opts Options) *Plugin { return &Plugin{opts: opts} }
+// New returns the plugin with opts as its starting point, which the
+// application's plugin configuration may override. In development it is on, and
+// everywhere else it is off.
+func New(opts Options) *Plugin { return &Plugin{opts: opts} }
 
 func (p *Plugin) Name() string                   { return Name }
-func (p *Plugin) Version() string                { return "0.3.2" }
+func (p *Plugin) Version() string                { return "0.4.0" }
 func (p *Plugin) Shutdown(context.Context) error { return nil }
 
 var (
