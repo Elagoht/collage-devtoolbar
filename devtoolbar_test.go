@@ -11,10 +11,10 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"testing/fstest"
 
 	devtoolbar "github.com/Elagoht/collage-devtoolbar"
 	"github.com/Elagoht/collage/pkg/collage"
+	"github.com/Elagoht/collage/pkg/collagetest"
 )
 
 // checker reports one warning and one error on every render, as a checking plugin
@@ -41,29 +41,6 @@ func app(t *testing.T, dev bool, plugins ...collage.Plugin) *collage.App {
 // appWith is app with a last say over the configuration.
 func appWith(t *testing.T, dev bool, edit func(*collage.Config), plugins ...collage.Plugin) *collage.App {
 	t.Helper()
-	cfg := &collage.Config{
-		DevMode: dev,
-		Server:  collage.ServerConfig{Host: "localhost", Port: 3000},
-		Template: collage.TemplateConfig{FS: fstest.MapFS{
-			"t/p.html":     {Data: []byte(page)},
-			"t/shell.html": {Data: []byte(`<!doctype html><html><body>{{slot "side"}}{{slot "main"}}</body></html>`)},
-			"t/part.html":  {Data: []byte(`<p>part</p>`)},
-		}, Root: "t"},
-		Plugins: plugins,
-	}
-	if edit != nil {
-		edit(cfg)
-	}
-	a, err := collage.New(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := a.RegisterPage(collage.NewPage("home").WithContent(collage.NewFragment("home", "p.html").Build()).WithPath("en", "/").Static().Build()); err != nil {
-		t.Fatal(err)
-	}
-	if err := a.RegisterPage(collage.NewPage("x<y").WithContent(collage.NewFragment("xy", "p.html").Build()).WithPath("en", "/odd").Build()); err != nil {
-		t.Fatal(err)
-	}
 	side := collage.NewFragment("side", "part.html").WithData(collage.Load(
 		func(context.Context, *collage.RenderContext) (string, error) {
 			return "", errors.New("backend down")
@@ -75,35 +52,48 @@ func appWith(t *testing.T, dev bool, edit func(*collage.Config), plugins ...coll
 	shell := collage.NewFragment("shell", "shell.html").
 		WithSlot("side", collage.SlotSingle).WithSlotFragment("side", side).
 		WithSlot("main", collage.SlotSingle).WithSlotFragment("main", main).Build()
-	if err := a.RegisterPage(collage.NewPage("mixed").WithContent(shell).WithPath("en", "/mixed").WithDependencyTags("site").Build()); err != nil {
-		t.Fatal(err)
+	options := []collagetest.SiteOption{
+		collagetest.WithoutHome(),
+		collagetest.WithTemplates(map[string]string{
+			"p.html":     page,
+			"shell.html": `<!doctype html><html><body>{{slot "side"}}{{slot "main"}}</body></html>`,
+			"part.html":  `<p>part</p>`,
+		}),
+		collagetest.WithConfig(func(cfg *collage.Config) { cfg.DevMode = dev }),
+		collagetest.WithPlugins(plugins...),
+		collagetest.WithRegister(
+			collage.NewPage("home").WithContent(collage.NewFragment("home", "p.html").Build()).WithPath("en", "/").Static().Build(),
+			collage.NewPage("x<y").WithContent(collage.NewFragment("xy", "p.html").Build()).WithPath("en", "/odd").Build(),
+			collage.NewPage("mixed").WithContent(shell).WithPath("en", "/mixed").WithDependencyTags("site").Build(),
+			collage.NewDocument("data", "application/json").AtRoot("/data.json").WithBody([]byte(`{"a":1}`)).Build(),
+		),
 	}
-	if err := a.RegisterDocument(collage.NewDocument("data", "application/json").AtRoot("/data.json").WithBody([]byte(`{"a":1}`)).Build()); err != nil {
-		t.Fatal(err)
+	if edit != nil {
+		options = append(options, collagetest.WithConfig(edit))
 	}
-	if err := a.Handle("/raw/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte("data: 1\n\n"))
-		if http.NewResponseController(w).Flush() != nil {
-			w.Header().Set("X-Flush", "failed")
+	options = append(options, collagetest.WithSetup(func(a *collage.App) error {
+		if err := a.Handle("/raw/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: 1\n\n"))
+			if http.NewResponseController(w).Flush() != nil {
+				w.Header().Set("X-Flush", "failed")
+			}
+		})); err != nil {
+			return err
 		}
-	})); err != nil {
-		t.Fatal(err)
-	}
-	if err := a.Handle("/inm", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte("<!doctype html><html><body>" + html.EscapeString(r.Header.Get("If-None-Match")) + "</body></html>"))
-	})); err != nil {
-		t.Fatal(err)
-	}
-	if err := a.Handle("/undeclared", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusAccepted)
-		_, _ = w.Write([]byte("<!doctype html><html><body><p>İstanbul</p>"))
-		_, _ = w.Write([]byte("</body></html>"))
-	})); err != nil {
-		t.Fatal(err)
-	}
-	return a
+		if err := a.Handle("/inm", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte("<!doctype html><html><body>" + html.EscapeString(r.Header.Get("If-None-Match")) + "</body></html>"))
+		})); err != nil {
+			return err
+		}
+		return a.Handle("/undeclared", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte("<!doctype html><html><body><p>İstanbul</p>"))
+			_, _ = w.Write([]byte("</body></html>"))
+		}))
+	}))
+	return collagetest.NewSite(t, options...).App
 }
 
 func do(h http.Handler, method, path string, header ...string) *httptest.ResponseRecorder {
