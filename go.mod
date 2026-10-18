@@ -5,4 +5,4 @@ module github.com/Elagoht/collage-devtoolbar
 
 go 1.26
 
-require github.com/Elagoht/collage v0.61.4
+require github.com/Elagoht/collage v0.67.0

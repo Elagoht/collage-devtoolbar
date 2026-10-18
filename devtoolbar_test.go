@@ -78,20 +78,20 @@ func appWith(t *testing.T, dev bool, edit func(*collage.Config), plugins ...coll
 			if http.NewResponseController(w).Flush() != nil {
 				w.Header().Set("X-Flush", "failed")
 			}
-		})); err != nil {
+		}), collage.WithMiddleware()); err != nil {
 			return err
 		}
 		if err := a.Handle("/inm", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			_, _ = w.Write([]byte("<!doctype html><html><body>" + html.EscapeString(r.Header.Get("If-None-Match")) + "</body></html>"))
-		})); err != nil {
+		}), collage.WithMiddleware()); err != nil {
 			return err
 		}
 		return a.Handle("/undeclared", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusAccepted)
 			_, _ = w.Write([]byte("<!doctype html><html><body><p>İstanbul</p>"))
 			_, _ = w.Write([]byte("</body></html>"))
-		}))
+		}), collage.WithMiddleware())
 	}))
 	return collagetest.NewSite(t, options...).App
 }
