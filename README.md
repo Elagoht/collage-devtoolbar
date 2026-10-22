@@ -21,7 +21,7 @@ Requires collage v0.61.0 or later.
 
 ## The panel
 
-Collapsed, it is one line in the corner:
+Collapsed, it is one line in the bottom-left corner:
 
 ```
 collage  home (en) · 200 · 1.84ms · 1 failed fragment · 3 findings
@@ -49,6 +49,23 @@ no font.
 
 **Register it last.** A render's findings are those of the plugins whose
 `OnAfterRender` ran before this one's, in registration order.
+
+## Position
+
+`Position` puts the panel in another corner, or in the middle of the top or
+bottom edge: `top-left`, `top`, `top-right`, `bottom-right`, `bottom` or
+`bottom-left` (the default).
+
+```go
+devtoolbar.New(devtoolbar.Options{Position: devtoolbar.PositionTopRight})
+```
+
+```json
+{ "elagoht/devtoolbar": { "position": "top-right" } }
+```
+
+Any other value fails `Init`, so a misspelt one is an error at start-up rather
+than a panel somewhere nobody asked for.
 
 ## How it works
 
@@ -150,6 +167,12 @@ Because the whole HTML response is held back to add the panel, a page that strea
 its HTML arrives at once in development.
 
 ## Changes
+
+### v0.5.0
+
+- **`Options.Position`** (`position`) puts the panel in any of the four corners
+  or the middle of the top or bottom edge; it stays bottom-left by default. An
+  unknown position fails `Init`.
 
 ### v0.4.2
 

@@ -1,5 +1,5 @@
-// Package devtoolbar is a collage plugin that shows a small panel at the bottom of
-// every page in development.
+// Package devtoolbar is a collage plugin that shows a small panel on every page in
+// development, in the bottom-left corner unless Options.Position puts it elsewhere.
 //
 //	app, err := collage.New(&collage.Config{
 //		DevMode: true,
@@ -54,6 +54,35 @@ type Options struct {
 	// client): a request from anywhere else means development mode is serving
 	// the public, and its responses go out untouched.
 	AllowRemote bool `json:"allowRemote"`
+	// Position is where on the screen the panel sits: one of the four corners,
+	// "top-left", "top-right", "bottom-right", "bottom-left", or the middle of the
+	// top or bottom edge, "top", "bottom". Empty is "bottom-left".
+	Position Position `json:"position"`
+}
+
+// Position is where on the screen the panel sits, as the configuration names it.
+type Position string
+
+// The positions. PositionDefault, the empty string, is PositionBottomLeft.
+const (
+	PositionDefault     Position = ""
+	PositionTopLeft     Position = "top-left"
+	PositionTop         Position = "top"
+	PositionTopRight    Position = "top-right"
+	PositionBottomRight Position = "bottom-right"
+	PositionBottom      Position = "bottom"
+	PositionBottomLeft  Position = "bottom-left"
+)
+
+// placements is the panel's offset from the viewport for each position. One
+// centred on an edge is pulled back by half its own width.
+var placements = map[Position]string{
+	PositionTopLeft:     "top:8px;left:8px",
+	PositionTop:         "top:8px;left:50%;transform:translateX(-50%)",
+	PositionTopRight:    "top:8px;right:8px",
+	PositionBottomRight: "bottom:8px;right:8px",
+	PositionBottom:      "bottom:8px;left:50%;transform:translateX(-50%)",
+	PositionBottomLeft:  "bottom:8px;left:8px",
 }
 
 // Plugin draws the panel.
@@ -73,7 +102,7 @@ type Plugin struct {
 func New(opts Options) *Plugin { return &Plugin{opts: opts} }
 
 func (p *Plugin) Name() string                   { return Name }
-func (p *Plugin) Version() string                { return "0.4.2" }
+func (p *Plugin) Version() string                { return "0.5.0" }
 func (p *Plugin) Shutdown(context.Context) error { return nil }
 
 var (
@@ -86,6 +115,12 @@ func (p *Plugin) Init(_ context.Context, host collage.Host) error {
 	opts, err := collage.PluginConfig(host, p.opts)
 	if err != nil {
 		return err
+	}
+	if opts.Position == PositionDefault {
+		opts.Position = PositionBottomLeft
+	}
+	if _, ok := placements[opts.Position]; !ok {
+		return fmt.Errorf("devtoolbar: unknown position %q; want top-left, top, top-right, bottom-right, bottom or bottom-left", opts.Position)
 	}
 	p.opts = opts
 	p.log = host.Logger()
@@ -273,7 +308,7 @@ func (p *Plugin) middleware(next http.Handler) http.Handler {
 		r.Header.Del("If-None-Match")
 		r.Header.Del("If-Modified-Since")
 		rec := &record{}
-		bw := &bufferWriter{ResponseWriter: w, head: r.Method == http.MethodHead}
+		bw := &bufferWriter{ResponseWriter: w, head: r.Method == http.MethodHead, position: p.opts.Position}
 		next.ServeHTTP(bw, r.WithContext(context.WithValue(r.Context(), recordKey{}, rec)))
 		bw.finish(rec)
 	})
@@ -290,6 +325,7 @@ func (p *Plugin) middleware(next http.Handler) http.Handler {
 type bufferWriter struct {
 	http.ResponseWriter
 	head      bool
+	position  Position
 	status    int
 	decided   bool
 	buffering bool
@@ -369,7 +405,7 @@ func (w *bufferWriter) finish(rec *record) {
 	body := w.body.Bytes()
 	if !w.head {
 		if at := lastBodyClose(body); at >= 0 {
-			panel := render(rec, status, w.Header(), len(body))
+			panel := render(rec, w.position, status, w.Header(), len(body))
 			out := make([]byte, 0, len(body)+len(panel))
 			out = append(out, body[:at]...)
 			out = append(out, panel...)
@@ -398,7 +434,7 @@ func lastBodyClose(body []byte) int {
 	return bytes.LastIndex(lower, []byte("</body>"))
 }
 
-func render(rec *record, status int, h http.Header, size int) []byte {
+func render(rec *record, position Position, status int, h http.Header, size int) []byte {
 	dash := func(s string) string {
 		if s == "" {
 			return "—"
@@ -469,6 +505,7 @@ func render(rec *record, status int, h http.Header, size int) []byte {
 	var b strings.Builder
 	b.WriteString(`<div id="collage-devtoolbar" role="region" aria-label="collage development toolbar">`)
 	b.WriteString(style)
+	b.WriteString(`#collage-devtoolbar{` + placements[position] + `}</style>`)
 	b.WriteString(`<details><summary><span class="cdt-brand">collage</span> `)
 	b.WriteString(html.EscapeString(strings.Join(summary, " · ")))
 	b.WriteString(`</summary><dl>`)
@@ -527,8 +564,10 @@ func formatSize(n int) string {
 
 // style is scoped to the panel's id, and resets what a site's own stylesheet could
 // have given its elements, so the panel looks the same on every page.
+// It names no place on the screen: the position's offsets follow it in the same
+// <style>, after the all:initial that would otherwise reset them.
 const style = `<style>
-#collage-devtoolbar{all:initial;position:fixed;left:8px;bottom:8px;z-index:2147483647;display:flex;align-items:flex-start;gap:4px;max-width:calc(100vw - 16px);font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#e8e8e8;background:#1d1f21;border:1px solid #444;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,.35)}
+#collage-devtoolbar{all:initial;position:fixed;z-index:2147483647;display:flex;align-items:flex-start;gap:4px;max-width:calc(100vw - 16px);font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#e8e8e8;background:#1d1f21;border:1px solid #444;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,.35)}
 #collage-devtoolbar *{box-sizing:border-box;font:inherit;color:inherit;margin:0;padding:0}
 #collage-devtoolbar details{padding:4px 8px;min-width:0}
 #collage-devtoolbar summary{cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -540,4 +579,4 @@ const style = `<style>
 #collage-devtoolbar .cdt-failed{color:#ff8a80}
 #collage-devtoolbar button{cursor:pointer;background:none;border:0;padding:4px 8px;font-size:14px;line-height:1}
 #collage-devtoolbar summary:focus-visible,#collage-devtoolbar button:focus-visible{outline:2px solid #8fd18f;outline-offset:1px}
-</style>`
+`
