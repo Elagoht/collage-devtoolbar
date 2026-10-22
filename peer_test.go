@@ -108,7 +108,7 @@ func TestAllowRemote(t *testing.T) {
 // Behind a proxy collage trusts, the client is the one the proxy names: a public
 // visitor reaching a development server through nginx on the same machine gets
 // no panel. From a peer that is not trusted, X-Forwarded-For is a header anyone
-// can write, so it changes nothing.
+// can write, so it never names the client: naming a local one changes nothing.
 func TestTrustedProxyNamesTheClient(t *testing.T) {
 	h := appWith(t, true, func(c *collage.Config) {
 		c.Server.TrustedProxies = []string{"127.0.0.1"}
@@ -119,7 +119,57 @@ func TestTrustedProxyNamesTheClient(t *testing.T) {
 	if w := from(h, "127.0.0.1:1", "/", "X-Forwarded-For", "192.168.1.20"); !strings.Contains(w.Body.String(), panelMark) {
 		t.Error("no panel for a LAN client behind a trusted proxy")
 	}
-	if w := from(h, "10.0.0.7:1", "/", "X-Forwarded-For", "203.0.113.5"); !strings.Contains(w.Body.String(), panelMark) {
-		t.Error("a forged X-Forwarded-For from an untrusted peer hid the panel")
+	if w := from(h, "10.0.0.7:1", "/", "X-Forwarded-For", "192.168.1.20"); !strings.Contains(w.Body.String(), panelMark) {
+		t.Error("X-Forwarded-For naming a local client from an untrusted peer hid the panel")
+	}
+}
+
+// A local peer that forwards a non-local client is a proxy Server.TrustedProxies
+// forgot: every visitor behind it arrives as its 127.x or 10.x address, so it
+// gets no panel, whichever forwarding header it writes, and the first such
+// request warns, once, naming TrustedProxies. A proxy forwarding a local
+// client, or only itself, still shows it. The header can only take the panel
+// away, never give it: a public peer writing it is still refused.
+func TestUntrustedProxyGetsNoPanel(t *testing.T) {
+	var buf bytes.Buffer
+	h := appWith(t, true, func(c *collage.Config) {
+		c.Logger = slog.New(slog.NewTextHandler(&buf, nil))
+	}, devtoolbar.New(devtoolbar.Options{})).Handler()
+	for _, c := range [][]string{
+		{"127.0.0.1:1", "X-Forwarded-For", "203.0.113.5"},
+		{"10.0.0.2:1", "X-Forwarded-For", "192.168.1.20, 203.0.113.5:4000"},
+		{"[::1]:1", "X-Forwarded-For", "[2001:db8::5]"},
+		{"127.0.0.1:1", "X-Forwarded-For", "unknown"},
+		{"127.0.0.1:1", "Forwarded", `for=192.168.1.20, for="[2001:db8::5]:4711";proto=https`},
+		{"127.0.0.1:1", "Forwarded", "For=203.0.113.5"},
+		{"127.0.0.1:1", "Forwarded", "for=_hidden"},
+		{"127.0.0.1:1", "Forwarded", "proto=https"},
+		{"172.17.0.1:1", "X-Real-IP", "203.0.113.5"},
+		{"127.0.0.1:1", "X-Forwarded-For", "127.0.0.1", "X-Real-IP", "203.0.113.5"},
+	} {
+		if w := from(h, c[0], "/", c[1:]...); strings.Contains(w.Body.String(), panelMark) {
+			t.Errorf("%v: panel through an untrusted proxy", c)
+		}
+	}
+	if n := strings.Count(buf.String(), "TrustedProxies"); n != 1 {
+		t.Errorf("%d TrustedProxies warnings, want 1:\n%s", n, buf.String())
+	}
+	for _, c := range [][]string{
+		{"127.0.0.1:1", "X-Forwarded-For", "127.0.0.1"},
+		{"127.0.0.1:1", "X-Forwarded-For", "[::1]:5000"},
+		{"10.0.0.2:1", "X-Forwarded-For", "203.0.113.5, 192.168.1.20"},
+		{"127.0.0.1:1", "Forwarded", `for="[fd00::1]"`},
+		{"172.17.0.1:1", "X-Real-IP", "172.17.0.1"},
+	} {
+		if w := from(h, c[0], "/", c[1:]...); !strings.Contains(w.Body.String(), panelMark) {
+			t.Errorf("%v: no panel for a local client through a local proxy", c)
+		}
+	}
+	if w := from(h, "203.0.113.5:1", "/", "X-Forwarded-For", "127.0.0.1"); strings.Contains(w.Body.String(), panelMark) {
+		t.Error("X-Forwarded-For gave a public peer the panel")
+	}
+	allow := app(t, true, devtoolbar.New(devtoolbar.Options{AllowRemote: true})).Handler()
+	if w := from(allow, "127.0.0.1:1", "/", "X-Forwarded-For", "203.0.113.5"); !strings.Contains(w.Body.String(), panelMark) {
+		t.Error("AllowRemote did not show the panel through a proxy")
 	}
 }

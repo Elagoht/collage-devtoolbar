@@ -14,7 +14,9 @@
 //
 // In development it draws the panel only for a peer on the developer's machine or
 // a private network, unless Options.AllowRemote is set: any other peer means
-// development mode is serving the public, and gets the response untouched.
+// development mode is serving the public, and gets the response untouched. So
+// does a local peer that forwards a non-local client: a proxy missing from
+// Server.TrustedProxies, behind which every visitor would look local.
 //
 // Outside development it does nothing at all: no middleware is installed, no hook
 // does any work, and a static build renders every page exactly as it would
@@ -27,7 +29,9 @@ import (
 	"fmt"
 	"html"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -58,6 +62,9 @@ type Plugin struct {
 	dev    bool
 	log    *slog.Logger
 	warned atomic.Bool
+	// proxyWarned is set by the first request refused as coming through a
+	// proxy Server.TrustedProxies does not list.
+	proxyWarned atomic.Bool
 }
 
 // New returns the plugin with opts as its starting point, which the
@@ -66,7 +73,7 @@ type Plugin struct {
 func New(opts Options) *Plugin { return &Plugin{opts: opts} }
 
 func (p *Plugin) Name() string                   { return Name }
-func (p *Plugin) Version() string                { return "0.4.1" }
+func (p *Plugin) Version() string                { return "0.4.2" }
 func (p *Plugin) Shutdown(context.Context) error { return nil }
 
 var (
@@ -96,8 +103,102 @@ func (p *Plugin) Init(_ context.Context, host collage.Host) error {
 // peer's X-Forwarded-For is never read, and a client collage cannot name is
 // not local.
 func local(r *http.Request) bool {
-	a := collage.ClientIP(r)
+	return isLocal(collage.ClientIP(r))
+}
+
+func isLocal(a netip.Addr) bool {
 	return a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast()
+}
+
+// untrustedProxy reports whether r looks like it came through a proxy that
+// Server.TrustedProxies does not list: collage named the connection's own,
+// local, address as the client, yet the request carries X-Forwarded-For,
+// Forwarded or X-Real-IP naming someone who is not local, or naming them in a
+// way that cannot be read.
+//
+// Without it, a development server behind nginx or a tunnel that nobody listed
+// would show the panel to every visitor, since each one arrives as the proxy's
+// 127.x or 10.x address. A proxy that forwards a local client (a dev proxy on
+// the same machine, a LAN peer) still shows it, as a direct request from that
+// client would. The headers are only a refusal signal here: a client writing
+// them can only take its own panel away, never get one it would not have had.
+// The client is still collage.ClientIP; a proxy that forwards nothing at all
+// cannot be told apart from a local browser, and only TrustedProxies fixes that.
+func untrustedProxy(r *http.Request) bool {
+	client := collage.ClientIP(r)
+	if !client.IsValid() || client.Unmap().WithZone("") != remoteAddr(r) {
+		// A trusted proxy already named the client, and local judged it.
+		return false
+	}
+	if v := r.Header.Values("X-Forwarded-For"); len(v) > 0 {
+		last := v[len(v)-1]
+		if i := strings.LastIndexByte(last, ','); i >= 0 {
+			last = last[i+1:]
+		}
+		if !forwardsLocal(strings.TrimSpace(last)) {
+			return true
+		}
+	}
+	if v := r.Header.Values("Forwarded"); len(v) > 0 {
+		if !forwardsLocal(forwardedFor(v[len(v)-1])) {
+			return true
+		}
+	}
+	if v := r.Header.Values("X-Real-Ip"); len(v) > 0 {
+		if !forwardsLocal(strings.TrimSpace(v[len(v)-1])) {
+			return true
+		}
+	}
+	return false
+}
+
+// forwardedFor is the for= parameter of the last element of a Forwarded header
+// value (RFC 7239), unquoted: the client the nearest proxy names. It is empty
+// when that element has none.
+func forwardedFor(v string) string {
+	if i := strings.LastIndexByte(v, ','); i >= 0 {
+		v = v[i+1:]
+	}
+	for pair := range strings.SplitSeq(v, ";") {
+		k, val, ok := strings.Cut(strings.TrimSpace(pair), "=")
+		if ok && strings.EqualFold(strings.TrimSpace(k), "for") {
+			return strings.Trim(strings.TrimSpace(val), `"`)
+		}
+	}
+	return ""
+}
+
+// forwardsLocal reports whether e, an address a proxy forwarded for, with or
+// without a port, an IPv6 one in brackets or not, names a local client. One
+// that is not an address at all ("unknown", an obfuscated name, nothing) is
+// not local: something forwarded a client this plugin cannot place.
+func forwardsLocal(e string) bool {
+	if a, err := netip.ParseAddr(e); err == nil {
+		return isLocal(a.Unmap())
+	}
+	if ap, err := netip.ParseAddrPort(e); err == nil {
+		return isLocal(ap.Addr().Unmap())
+	}
+	if len(e) > 2 && e[0] == '[' && e[len(e)-1] == ']' {
+		if a, err := netip.ParseAddr(e[1 : len(e)-1]); err == nil {
+			return isLocal(a.Unmap())
+		}
+	}
+	return false
+}
+
+// remoteAddr is r.RemoteAddr's host, with or without a port, unmapped and
+// without its zone; the zero Addr when it holds none.
+func remoteAddr(r *http.Request) netip.Addr {
+	host := r.RemoteAddr
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	a, err := netip.ParseAddr(host)
+	if err != nil {
+		return netip.Addr{}
+	}
+	return a.Unmap().WithZone("")
 }
 
 // record is what the render told the plugin about one request, carried from
@@ -153,6 +254,14 @@ func (p *Plugin) middleware(next http.Handler) http.Handler {
 		if !p.opts.AllowRemote && !local(r) {
 			if p.warned.CompareAndSwap(false, true) {
 				p.log.Warn("devtoolbar: DevMode is serving a non-local peer; the panel is off for it",
+					"peer", r.RemoteAddr)
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
+		if !p.opts.AllowRemote && untrustedProxy(r) {
+			if p.proxyWarned.CompareAndSwap(false, true) {
+				p.log.Warn("devtoolbar: a local peer forwards a non-local client, so it is probably a proxy missing from Server.TrustedProxies; the panel is off for requests through it",
 					"peer", r.RemoteAddr)
 			}
 			next.ServeHTTP(w, r)

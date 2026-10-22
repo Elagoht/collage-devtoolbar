@@ -98,7 +98,22 @@ The address checked is `collage.ClientIP`'s. That is the connection's own addres
 or, behind a proxy listed in `Server.TrustedProxies`, the client that proxy
 forwarded for. A development server behind nginx on the same machine therefore
 shows the panel only to local clients, provided the proxy is listed. Without
-`TrustedProxies`, `X-Forwarded-For` is never read, because a client can write it.
+`TrustedProxies`, `X-Forwarded-For` never names the client, because a client can
+write it.
+
+A proxy that is not listed would make every visitor look local: each arrives as
+the proxy's `127.x` or `10.x` address. So a local peer whose request carries
+`X-Forwarded-For`, `Forwarded` or `X-Real-IP` naming a client that is not local
+(or naming it unreadably, as `unknown`) gets no panel either, and the first such
+request logs:
+
+```
+WARN devtoolbar: a local peer forwards a non-local client, so it is probably a proxy missing from Server.TrustedProxies; the panel is off for requests through it peer=127.0.0.1:51234
+```
+
+Those headers can only take the panel away, never give it. A proxy that forwards
+a local client still shows it, and a proxy that forwards no header at all cannot
+be told from a local browser: list it in `TrustedProxies`.
 
 A tailnet or carrier-grade NAT address (`100.64.0.0/10`) is not a private network,
 so a phone reaching the machine over Tailscale gets no panel. To show it to
@@ -135,6 +150,15 @@ Because the whole HTML response is held back to add the panel, a page that strea
 its HTML arrives at once in development.
 
 ## Changes
+
+### v0.4.2
+
+- **A forgotten proxy gets no panel.** A local peer whose request carries
+  `X-Forwarded-For`, `Forwarded` or `X-Real-IP` naming a non-local client is
+  taken for a proxy missing from `Server.TrustedProxies`, and the response goes
+  out untouched; the first such request logs a warning naming `TrustedProxies`.
+  Before, every visitor behind such a proxy arrived as its local address and saw
+  the panel.
 
 ### v0.4.0
 
